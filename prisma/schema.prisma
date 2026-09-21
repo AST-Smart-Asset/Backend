@@ -1,0 +1,312 @@
+// Prisma Schema for Smart Asset Inventory & Predictive Maintenance (AST)
+// Compliant with DevHub Field Phase 12-Table ERD and BUA common architecture conventions
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+// -------------------------------------------------------------
+// 1. IDENTITY & ACCESS CONTROL
+// -------------------------------------------------------------
+
+model OrgUnit {
+  id        String    @id @default(uuid())
+  parentId  String?   @map("parent_id")
+  name      String
+  unitType  String    @map("unit_type") // 'university', 'campus', 'college', 'department'
+  isActive  Boolean   @default(true) @map("is_active")
+  createdAt DateTime  @default(now()) @map("created_at")
+  updatedAt DateTime  @updatedAt @map("updated_at")
+
+  parent    OrgUnit?   @relation("OrgUnitHierarchy", fields: [parentId], references: [id], onDelete: Restrict)
+  children  OrgUnit[]  @relation("OrgUnitHierarchy")
+  locations Location[]
+  userRoles UserRole[]
+
+  @@map("org_units")
+}
+
+model User {
+  id           String    @id @default(uuid())
+  email        String    @unique
+  fullName     String    @map("full_name")
+  passwordHash String    @map("password_hash")
+  status       String    @default("active") // 'active', 'suspended'
+  mfaEnabled   Boolean   @default(false) @map("mfa_enabled")
+  createdAt    DateTime  @default(now()) @map("created_at")
+  updatedAt    DateTime  @updatedAt @map("updated_at")
+
+  userRoles        UserRole[]
+  custodyAssets    Asset[]             @relation("UserCustody")
+  assignedOrders   WorkOrder[]         @relation("TechnicianOrders")
+  actorEvents      AssetEvent[]        @relation("ActorUserEvents")
+  fromCustodyEvents AssetEvent[]       @relation("FromCustodianEvents")
+  toCustodyEvents   AssetEvent[]       @relation("ToCustodianEvents")
+  uploadedDocs     AssetDocument[]     @relation("DocUploader")
+  auditEntries     AuditLog[]          @relation("AuditActor")
+  stocktakeObservations StocktakeObservation[]
+
+  @@map("users")
+}
+
+model Role {
+  id        String     @id @default(uuid())
+  code      String     @unique // 'super_admin', 'asset_admin', 'procurement_finance', 'custodian_manager', 'technician', 'auditor'
+  name      String
+  isSystem  Boolean    @default(true) @map("is_system")
+  createdAt DateTime   @default(now()) @map("created_at")
+
+  userRoles UserRole[]
+
+  @@map("roles")
+}
+
+model UserRole {
+  id        String    @id @default(uuid())
+  userId    String    @map("user_id")
+  roleId    String    @map("role_id")
+  orgUnitId String?   @map("org_unit_id") // Scope root for RLS/RBAC
+  grantedBy String?   @map("granted_by")
+  expiresAt DateTime? @map("expires_at")
+  createdAt DateTime  @default(now()) @map("created_at")
+
+  user    User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  role    Role     @relation(fields: [roleId], references: [id], onDelete: Restrict)
+  orgUnit OrgUnit? @relation(fields: [orgUnitId], references: [id], onDelete: SetNull)
+
+  @@unique([userId, roleId, orgUnitId])
+  @@map("user_roles")
+}
+
+// -------------------------------------------------------------
+// 2. ASSET REGISTRY & LOCATIONS (AST-FR-01, AST-FR-02)
+// -------------------------------------------------------------
+
+model Location {
+  id           String     @id @default(uuid())
+  parentId     String?    @map("parent_id")
+  orgUnitId    String     @map("org_unit_id")
+  locationType String     @map("location_type") // 'campus', 'building', 'college_dept', 'floor', 'room', 'office', 'storage_area'
+  name         String
+  code         String
+  isActive     Boolean    @default(true) @map("is_active")
+  createdAt    DateTime   @default(now()) @map("created_at")
+  updatedAt    DateTime   @updatedAt @map("updated_at")
+
+  parent       Location?  @relation("LocationHierarchy", fields: [parentId], references: [id], onDelete: Restrict)
+  children     Location[] @relation("LocationHierarchy")
+  orgUnit      OrgUnit    @relation(fields: [orgUnitId], references: [id], onDelete: Restrict)
+  assets       Asset[]    @relation("CurrentLocation")
+  fromEvents   AssetEvent[] @relation("FromLocationEvents")
+  toEvents     AssetEvent[] @relation("ToLocationEvents")
+  stocktakes   StocktakeSession[]
+  stocktakeObservations StocktakeObservation[]
+
+  @@map("locations")
+}
+
+model AssetCategory {
+  id               String          @id @default(uuid())
+  parentId         String?         @map("parent_id")
+  code             String          @unique
+  name             String
+  usefulLifeMonths Int             @default(36) @map("useful_life_months")
+  requiresSerial   Boolean         @default(true) @map("requires_serial")
+  createdAt        DateTime        @default(now()) @map("created_at")
+  updatedAt        DateTime        @updatedAt @map("updated_at")
+
+  parent           AssetCategory?  @relation("CategoryHierarchy", fields: [parentId], references: [id], onDelete: Restrict)
+  children         AssetCategory[] @relation("CategoryHierarchy")
+  assets           Asset[]
+  templates        MaintenanceTemplate[]
+
+  @@map("asset_categories")
+}
+
+model Asset {
+  id                String         @id @default(uuid())
+  categoryId        String         @map("category_id")
+  currentLocationId String         @map("current_location_id")
+  custodianUserId   String?        @map("custodian_user_id")
+  assetTag          String         @unique @map("asset_tag")
+  serialNumber      String?        @unique @map("serial_number")
+  brand             String?
+  model             String?
+  specifications    Json?
+  condition         String         @default("good") // 'excellent', 'good', 'fair', 'poor', 'damaged'
+  status            String         @default("in_service") // 'in_service', 'in_storage', 'under_maintenance', 'transferred', 'disposed', 'retired', 'missing'
+  purchaseDate      DateTime?      @map("purchase_date")
+  purchaseCost      Decimal?       @db.Decimal(12, 2) @map("purchase_cost")
+  riskBand          String         @default("low") @map("risk_band") // 'low', 'medium', 'high', 'critical'
+  riskReasons       Json?          @map("risk_reasons") // Array of advisory explanation strings
+  createdBy         String?        @map("created_by")
+  updatedBy         String?        @map("updated_by")
+  createdAt         DateTime       @default(now()) @map("created_at")
+  updatedAt         DateTime       @updatedAt @map("updated_at")
+
+  category        AssetCategory   @relation(fields: [categoryId], references: [id], onDelete: Restrict)
+  currentLocation Location        @relation("CurrentLocation", fields: [currentLocationId], references: [id], onDelete: Restrict)
+  custodian       User?           @relation("UserCustody", fields: [custodianUserId], references: [id], onDelete: SetNull)
+  documents       AssetDocument[]
+  events          AssetEvent[]
+  workOrders      WorkOrder[]
+  stocktakeObservations StocktakeObservation[]
+
+  @@map("assets")
+}
+
+// -------------------------------------------------------------
+// 3. SECURITY, DOCUMENTS & AUDIT TRAIL (AST-FR-03, AST-FR-04)
+// -------------------------------------------------------------
+
+model AssetDocument {
+  id                 String   @id @default(uuid())
+  assetId            String   @map("asset_id")
+  documentType       String   @map("document_type") // 'invoice', 'warranty', 'purchase_order', 'receipt', 'disposal_evidence', 'other'
+  title              String
+  fileName           String   @map("file_name")
+  fileSizeBytes      Int      @map("file_size_bytes")
+  mimeType           String   @map("mime_type")
+  privateStorageKey  String   @map("private_storage_key")
+  sha256Hex          String   @map("sha256_hex")
+  malwareScanStatus  String   @default("clean") @map("malware_scan_status") // 'pending', 'clean', 'flagged'
+  uploadedByUserId   String?  @map("uploaded_by_user_id")
+  createdAt          DateTime @default(now()) @map("created_at")
+
+  asset      Asset    @relation(fields: [assetId], references: [id], onDelete: Cascade)
+  uploadedBy User?    @relation("DocUploader", fields: [uploadedByUserId], references: [id], onDelete: SetNull)
+
+  @@map("asset_documents")
+}
+
+model AssetEvent {
+  id              String    @id @default(uuid())
+  assetId         String    @map("asset_id")
+  actorUserId     String?   @map("actor_user_id")
+  fromLocationId  String?   @map("from_location_id")
+  toLocationId    String?   @map("to_location_id")
+  fromCustodianId String?   @map("from_custodian_id")
+  toCustodianId   String?   @map("to_custodian_id")
+  eventType       String    @map("event_type") // 'registered', 'transferred', 'checked_out', 'checked_in', 'maintenance_scheduled', 'maintenance_completed', 'condition_updated', 'disposed', 'audited'
+  eventData       Json?     @map("event_data")
+  createdAt       DateTime  @default(now()) @map("created_at")
+
+  asset         Asset     @relation(fields: [assetId], references: [id], onDelete: Cascade)
+  actor         User?     @relation("ActorUserEvents", fields: [actorUserId], references: [id], onDelete: SetNull)
+  fromLocation  Location? @relation("FromLocationEvents", fields: [fromLocationId], references: [id], onDelete: SetNull)
+  toLocation    Location? @relation("ToLocationEvents", fields: [toLocationId], references: [id], onDelete: SetNull)
+  fromCustodian User?     @relation("FromCustodianEvents", fields: [fromCustodianId], references: [id], onDelete: SetNull)
+  toCustodian   User?     @relation("ToCustodianEvents", fields: [toCustodianId], references: [id], onDelete: SetNull)
+
+  @@map("asset_events")
+}
+
+model AuditLog {
+  id            String    @id @default(uuid())
+  actorUserId   String?   @map("actor_user_id")
+  action        String    // 'CREATE', 'UPDATE', 'DELETE', 'APPROVE', 'EXPORT', 'PREDICTION_RUN', 'ROLE_CHANGE'
+  tableName     String    @map("table_name")
+  recordId      String?   @map("record_id")
+  metadata      Json?     // Sanitized metadata without credentials/tokens
+  ipAddress     String?   @map("ip_address")
+  userAgent     String?   @map("user_agent")
+  createdAt     DateTime  @default(now()) @map("created_at")
+
+  actor         User?     @relation("AuditActor", fields: [actorUserId], references: [id], onDelete: SetNull)
+
+  @@map("audit_log")
+}
+
+// -------------------------------------------------------------
+// 4. MAINTENANCE & WORK ORDERS (AST-FR-05, AST-FR-06)
+// -------------------------------------------------------------
+
+model MaintenanceTemplate {
+  id            String        @id @default(uuid())
+  categoryId    String        @map("category_id")
+  title         String
+  triggerType   String        @map("trigger_type") // 'calendar', 'runtime', 'condition'
+  intervalDays  Int?          @map("interval_days")
+  runtimeHours  Int?          @map("runtime_hours")
+  conditionRule Json?         @map("condition_rule")
+  checklist     Json?         // Structured checklist steps
+  createdAt     DateTime      @default(now()) @map("created_at")
+  updatedAt     DateTime      @updatedAt @map("updated_at")
+
+  category      AssetCategory @relation(fields: [categoryId], references: [id], onDelete: Restrict)
+  workOrders    WorkOrder[]
+
+  @@map("maintenance_templates")
+}
+
+model WorkOrder {
+  id               String               @id @default(uuid())
+  assetId          String               @map("asset_id")
+  templateId       String?              @map("template_id")
+  technicianUserId String?              @map("technician_user_id")
+  priority         String               @default("medium") // 'low', 'medium', 'high', 'critical'
+  status           String               @default("draft") // 'draft', 'assigned', 'in_progress', 'completed', 'cancelled'
+  scheduledDate    DateTime?            @map("scheduled_date")
+  dueDate          DateTime?            @map("due_date")
+  completedAt      DateTime?            @map("completed_at")
+  cost             Decimal?             @db.Decimal(10, 2)
+  downtimeHours    Decimal?             @db.Decimal(8, 2) @map("downtime_hours")
+  outcome          String?              // 'passed', 'repaired', 'replaced_parts', 'unresolvable'
+  completionNotes  String?              @map("completion_notes")
+  checklistResults Json?                @map("checklist_results")
+  nextDueAt        DateTime?            @map("next_due_at")
+  createdBy        String?              @map("created_by")
+  createdAt        DateTime             @default(now()) @map("created_at")
+  updatedAt        DateTime             @updatedAt @map("updated_at")
+
+  asset            Asset                @relation(fields: [assetId], references: [id], onDelete: Cascade)
+  template         MaintenanceTemplate? @relation(fields: [templateId], references: [id], onDelete: SetNull)
+  technician       User?                @relation("TechnicianOrders", fields: [technicianUserId], references: [id], onDelete: SetNull)
+
+  @@map("work_orders")
+}
+
+// -------------------------------------------------------------
+// 5. STOCKTAKE & AUDIT SESSIONS (AST-FR-07)
+// -------------------------------------------------------------
+
+model StocktakeSession {
+  id                 String                 @id @default(uuid())
+  locationId         String                 @map("location_id")
+  title              String
+  status             String                 @default("active") // 'active', 'completed', 'cancelled'
+  startedAt          DateTime               @default(now()) @map("started_at")
+  completedAt        DateTime?              @map("completed_at")
+  totalExpected      Int                    @default(0) @map("total_expected")
+  totalScanned       Int                    @default(0) @map("total_scanned")
+  discrepanciesCount Int                    @default(0) @map("discrepancies_count")
+  createdAt          DateTime               @default(now()) @map("created_at")
+
+  location           Location               @relation(fields: [locationId], references: [id], onDelete: Restrict)
+  observations       StocktakeObservation[]
+
+  @@map("stocktake_sessions")
+}
+
+model StocktakeObservation {
+  id                 String           @id @default(uuid())
+  sessionId          String           @map("session_id")
+  assetId            String           @map("asset_id")
+  observedLocationId String           @map("observed_location_id")
+  scannedByUserId    String           @map("scanned_by_user_id")
+  scannedAt          DateTime         @default(now()) @map("scanned_at")
+  status             String           // 'verified', 'missing', 'unexpected', 'moved'
+  notes              String?
+
+  session            StocktakeSession @relation(fields: [sessionId], references: [id], onDelete: Cascade)
+  asset              Asset            @relation(fields: [assetId], references: [id], onDelete: Cascade)
+  observedLocation   Location         @relation(fields: [observedLocationId], references: [id], onDelete: Restrict)
+  scannedBy          User             @relation(fields: [scannedByUserId], references: [id], onDelete: Restrict)
+
+  @@map("stocktake_observations")
+}

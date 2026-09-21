@@ -1,0 +1,56 @@
+name: AST Backend CI
+
+on:
+  push:
+    branches: [ main, develop ]
+  pull_request:
+    branches: [ main ]
+
+jobs:
+  build-and-test:
+    name: Lint, Test, & Docker Build
+    runs-on: ubuntu-latest
+
+    services:
+      postgres:
+        image: postgres:16-alpine
+        env:
+          POSTGRES_USER: ast_user
+          POSTGRES_PASSWORD: ast_secure_password_2026
+          POSTGRES_DB: ast_inventory_db
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+
+    steps:
+      - name: Checkout Source Code
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js Environment
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: 'npm'
+
+      - name: Install Dependencies
+        run: npm ci
+
+      - name: Run Prisma Generate
+        run: npx prisma generate
+
+      - name: Run Type Checking & Build
+        run: npm run build
+
+      - name: Run Automated Tests
+        run: npm test
+        env:
+          DATABASE_URL: postgresql://ast_user:ast_secure_password_2026@localhost:5432/ast_inventory_db?schema=public
+          JWT_ACCESS_SECRET: test_jwt_access_secret_key_12345
+          JWT_REFRESH_SECRET: test_jwt_refresh_secret_key_12345
+
+      - name: Verify Docker Build
+        run: docker build -t ast-backend:ci .

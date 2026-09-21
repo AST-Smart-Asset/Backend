@@ -1,0 +1,495 @@
+openapi: 3.0.3
+info:
+  title: Smart Asset Inventory & Predictive Maintenance API (AST)
+  version: 1.0.0
+  description: |
+    Production-grade backend REST API for university asset registry, custody, tracking,
+    work orders, and predictive maintenance. Compliant with BUA DevHub Field Phase conventions.
+servers:
+  - url: http://localhost:5000/api/v1
+    description: Local Development & Docker Staging Server
+
+components:
+  securitySchemes:
+    BearerAuth:
+      type: http
+      scheme: bearer
+      bearerFormat: JWT
+
+  schemas:
+    ApiResponse:
+      type: object
+      properties:
+        success:
+          type: boolean
+        data:
+          type: object
+        meta:
+          type: object
+          properties:
+            page:
+              type: integer
+            limit:
+              type: integer
+            total:
+              type: integer
+            totalPages:
+              type: integer
+        error:
+          type: object
+          properties:
+            code:
+              type: string
+            message:
+              type: string
+            details:
+              type: array
+              items:
+                type: object
+            requestId:
+              type: string
+
+    LoginRequest:
+      type: object
+      required:
+        - email
+        - password
+      properties:
+        email:
+          type: string
+          format: email
+          example: admin@bua.edu.eg
+        password:
+          type: string
+          example: Password123!
+
+    Asset:
+      type: object
+      properties:
+        id:
+          type: string
+          format: uuid
+        assetTag:
+          type: string
+          example: AST-PC-A101-001
+        serialNumber:
+          type: string
+          example: SN-HP-Z4-2024-001
+        categoryId:
+          type: string
+          format: uuid
+        currentLocationId:
+          type: string
+          format: uuid
+        custodianUserId:
+          type: string
+          format: uuid
+          nullable: true
+        brand:
+          type: string
+          example: HP
+        model:
+          type: string
+          example: Z4 G5 Workstation
+        condition:
+          type: string
+          enum: [excellent, good, fair, poor, damaged]
+        status:
+          type: string
+          enum: [in_service, in_storage, under_maintenance, transferred, disposed, retired, missing]
+        purchaseDate:
+          type: string
+          format: date-time
+        purchaseCost:
+          type: number
+          example: 2850.00
+        riskBand:
+          type: string
+          enum: [low, medium, high, critical]
+        riskReasons:
+          type: array
+          items:
+            type: string
+
+    TransferRequest:
+      type: object
+      required:
+        - targetLocationId
+        - reason
+      properties:
+        targetLocationId:
+          type: string
+          format: uuid
+        targetCustodianId:
+          type: string
+          format: uuid
+          nullable: true
+        reason:
+          type: string
+          example: Relocated to AI Lab 205 for autonomous drone research
+        approvalNotes:
+          type: string
+          example: Approved by Department Chair
+
+    WorkOrder:
+      type: object
+      properties:
+        id:
+          type: string
+          format: uuid
+        assetId:
+          type: string
+          format: uuid
+        templateId:
+          type: string
+          format: uuid
+          nullable: true
+        technicianUserId:
+          type: string
+          format: uuid
+          nullable: true
+        priority:
+          type: string
+          enum: [low, medium, high, critical]
+        status:
+          type: string
+          enum: [draft, assigned, in_progress, completed, cancelled]
+        cost:
+          type: number
+        downtimeHours:
+          type: number
+        outcome:
+          type: string
+          enum: [passed, repaired, replaced_parts, unresolvable]
+        nextDueAt:
+          type: string
+          format: date-time
+
+paths:
+  /auth/login:
+    post:
+      summary: User Login & JWT issuance
+      tags: [Authentication]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/LoginRequest'
+      responses:
+        '200':
+          description: Successfully authenticated
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiResponse'
+
+  /auth/me:
+    get:
+      summary: Current user profile and role assignments
+      tags: [Authentication]
+      security:
+        - BearerAuth: []
+      responses:
+        '200':
+          description: User profile
+
+  /org-units:
+    get:
+      summary: List organizational units tree
+      tags: [Organization Hierarchy]
+      security:
+        - BearerAuth: []
+      responses:
+        '200':
+          description: List of units
+
+  /locations:
+    get:
+      summary: List hierarchical locations (campus, building, floor, room)
+      tags: [Locations (AST-FR-01)]
+      security:
+        - BearerAuth: []
+      parameters:
+        - in: query
+          name: locationType
+          schema:
+            type: string
+        - in: query
+          name: search
+          schema:
+            type: string
+      responses:
+        '200':
+          description: Locations hierarchy
+
+  /assets:
+    get:
+      summary: Search and filter inventory assets
+      tags: [Asset Registry (AST-FR-02)]
+      security:
+        - BearerAuth: []
+      parameters:
+        - in: query
+          name: search
+          schema:
+            type: string
+        - in: query
+          name: status
+          schema:
+            type: string
+        - in: query
+          name: condition
+          schema:
+            type: string
+        - in: query
+          name: riskBand
+          schema:
+            type: string
+      responses:
+        '200':
+          description: Paginated assets list
+    post:
+      summary: Register new asset
+      tags: [Asset Registry (AST-FR-02)]
+      security:
+        - BearerAuth: []
+      responses:
+        '201':
+          description: Asset created
+
+  /assets/import:
+    post:
+      summary: Batch import assets with duplicate detection & per-row error report
+      tags: [Asset Registry (AST-FR-02)]
+      security:
+        - BearerAuth: []
+      responses:
+        '201':
+          description: Batch import result with error report
+
+  /custody/{assetId}/transfer:
+    post:
+      summary: Transfer asset to new location/custodian with immutable event log
+      tags: [Custody & Movements (AST-FR-04)]
+      security:
+        - BearerAuth: []
+      parameters:
+        - in: path
+          name: assetId
+          required: true
+          schema:
+            type: string
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/TransferRequest'
+      responses:
+        '200':
+          description: Asset transferred and event recorded
+
+  /custody/{assetId}/history:
+    get:
+      summary: Get full immutable movement and event trail
+      tags: [Custody & Movements (AST-FR-04)]
+      security:
+        - BearerAuth: []
+      parameters:
+        - in: path
+          name: assetId
+          required: true
+          schema:
+            type: string
+      responses:
+        '200':
+          description: Timeline of asset events
+
+  /documents:
+    post:
+      summary: Upload procurement/warranty document metadata to private vault
+      tags: [Evidence & Documents (AST-FR-03)]
+      security:
+        - BearerAuth: []
+      responses:
+        '201':
+          description: Document recorded
+
+  /documents/{id}/download-token:
+    get:
+      summary: Generate short-lived signed download token (no public URLs)
+      tags: [Evidence & Documents (AST-FR-03)]
+      security:
+        - BearerAuth: []
+      parameters:
+        - in: path
+          name: id
+          required: true
+          schema:
+            type: string
+      responses:
+        '200':
+          description: Ephemeral download token issued
+
+  /documents/download:
+    get:
+      summary: Stream authorized private document using short-lived signed token
+      tags: [Evidence & Documents (AST-FR-03)]
+      parameters:
+        - in: query
+          name: token
+          required: true
+          schema:
+            type: string
+      responses:
+        '200':
+          description: Document binary stream
+
+  /maintenance/templates:
+    get:
+      summary: List preventive maintenance templates
+      tags: [Maintenance Templates (AST-FR-05)]
+      security:
+        - BearerAuth: []
+      responses:
+        '200':
+          description: Templates list
+
+  /work-orders:
+    get:
+      summary: List work orders
+      tags: [Work Orders (AST-FR-06)]
+      security:
+        - BearerAuth: []
+      responses:
+        '200':
+          description: Work orders list
+    post:
+      summary: Create work order
+      tags: [Work Orders (AST-FR-06)]
+      security:
+        - BearerAuth: []
+      responses:
+        '201':
+          description: Work order created
+
+  /work-orders/{id}/close:
+    post:
+      summary: Complete work order, update downtime/cost and calculate next due date
+      tags: [Work Orders (AST-FR-06)]
+      security:
+        - BearerAuth: []
+      parameters:
+        - in: path
+          name: id
+          required: true
+          schema:
+            type: string
+      responses:
+        '200':
+          description: Work order closed and next due date calculated
+
+  /stocktake/sessions:
+    post:
+      summary: Create new physical QR stocktake audit session
+      tags: [Stocktake & Audits (AST-FR-07)]
+      security:
+        - BearerAuth: []
+      responses:
+        '201':
+          description: Session created
+
+  /stocktake/sessions/{sessionId}/scan:
+    post:
+      summary: Record QR scan observation (verified, moved, unexpected)
+      tags: [Stocktake & Audits (AST-FR-07)]
+      security:
+        - BearerAuth: []
+      parameters:
+        - in: path
+          name: sessionId
+          required: true
+          schema:
+            type: string
+      responses:
+        '201':
+          description: Scan recorded
+
+  /stocktake/sessions/{sessionId}/report:
+    get:
+      summary: Get stocktake discrepancy report (verified, missing, moved, unexpected)
+      tags: [Stocktake & Audits (AST-FR-07)]
+      security:
+        - BearerAuth: []
+      parameters:
+        - in: path
+          name: sessionId
+          required: true
+          schema:
+            type: string
+      responses:
+        '200':
+          description: Reconciled discrepancy summary
+
+  /dashboard/kpis:
+    get:
+      summary: Role-scoped reconciled KPI analytics
+      tags: [Dashboards (AST-FR-08)]
+      security:
+        - BearerAuth: []
+      responses:
+        '200':
+          description: Reconciled organizational analytics
+
+  /predictions/evaluate/{assetId}:
+    post:
+      summary: Evaluate asset maintenance-risk band with explainable reasons
+      tags: [Predictive Risk Engine (AST-FR-09)]
+      security:
+        - BearerAuth: []
+      parameters:
+        - in: path
+          name: assetId
+          required: true
+          schema:
+            type: string
+      responses:
+        '200':
+          description: Advisory evaluation output
+
+  /predictions/model-card:
+    get:
+      summary: AI Model Card, baseline metrics, and fallback documentation
+      tags: [Predictive Risk Engine (AST-FR-09)]
+      security:
+        - BearerAuth: []
+      responses:
+        '200':
+          description: Model card documentation
+
+  /disposal/{assetId}/retire:
+    post:
+      summary: Controlled retirement & disposal; permanently locks asset to read-only
+      tags: [Controlled Retirement (AST-FR-10)]
+      security:
+        - BearerAuth: []
+      parameters:
+        - in: path
+          name: assetId
+          required: true
+          schema:
+            type: string
+      responses:
+        '200':
+          description: Asset retired and locked in audit trail
+
+  /audit/logs:
+    get:
+      summary: Query system compliance audit trail
+      tags: [Audit & Compliance]
+      security:
+        - BearerAuth: []
+      responses:
+        '200':
+          description: Append-only audit records

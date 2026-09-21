@@ -1,0 +1,26 @@
+# Node & dependencies
+node_modules/
+dist/
+build/
+
+# Environment files
+.env
+.env.local
+.env.production
+
+# Logs & Storage
+logs/
+*.log
+npm-debug.log*
+uploads/
+storage/
+
+# IDE & OS
+.DS_Store
+Thumbs.db
+.vscode/
+.idea/
+
+# Testing & Coverage
+coverage/
+.nyc_output/

@@ -1,0 +1,54 @@
+version: '3.8'
+
+services:
+  # Primary Operational Database: PostgreSQL 16
+  postgres:
+    image: postgres:16-alpine
+    container_name: ast_postgres_db
+    restart: always
+    environment:
+      POSTGRES_USER: ast_user
+      POSTGRES_PASSWORD: ast_secure_password_2026
+      POSTGRES_DB: ast_inventory_db
+    ports:
+      - "5432:5432"
+    volumes:
+      - ast_pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ast_user -d ast_inventory_db"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+
+  # Primary Backend REST API
+  api:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: ast_backend_api
+    restart: unless-stopped
+    depends_on:
+      postgres:
+        condition: service_healthy
+    environment:
+      PORT: 5000
+      NODE_ENV: production
+      API_PREFIX: /api/v1
+      DATABASE_URL: postgresql://ast_user:ast_secure_password_2026@postgres:5432/ast_inventory_db?schema=public
+      JWT_ACCESS_SECRET: ast_super_secret_access_jwt_key_university_2026_devhub
+      JWT_REFRESH_SECRET: ast_super_secret_refresh_jwt_key_university_2026_devhub
+      JWT_ACCESS_EXPIRATION: 15m
+      JWT_REFRESH_EXPIRATION: 7d
+      STORAGE_DRIVER: local
+      STORAGE_LOCAL_PATH: /app/storage/documents
+      SIGNED_URL_EXPIRATION_SECONDS: 300
+    ports:
+      - "5000:5000"
+    volumes:
+      - ast_storage:/app/storage/documents
+
+volumes:
+  ast_pgdata:
+    driver: local
+  ast_storage:
+    driver: local
