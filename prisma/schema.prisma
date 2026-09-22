@@ -50,6 +50,7 @@ model User {
   uploadedDocs     AssetDocument[]     @relation("DocUploader")
   auditEntries     AuditLog[]          @relation("AuditActor")
   stocktakeObservations StocktakeObservation[]
+  scopeGrants      UserScopeGrant[]
 
   @@map("users")
 }
@@ -61,19 +62,60 @@ model Role {
   isSystem  Boolean    @default(true) @map("is_system")
   createdAt DateTime   @default(now()) @map("created_at")
 
-  userRoles UserRole[]
+  userRoles       UserRole[]
+  rolePermissions RolePermission[]
 
   @@map("roles")
 }
 
+model Permission {
+  id          String   @id @default(uuid())
+  code        String   @unique // 'assets:read', 'assets:write', 'assets:import', etc.
+  name        String
+  description String?
+  createdAt   DateTime @default(now()) @map("created_at")
+
+  rolePermissions RolePermission[]
+
+  @@map("permissions")
+}
+
+model RolePermission {
+  id           String   @id @default(uuid())
+  roleId       String   @map("role_id")
+  permissionId String   @map("permission_id")
+  createdAt    DateTime @default(now()) @map("created_at")
+
+  role       Role       @relation(fields: [roleId], references: [id], onDelete: Cascade)
+  permission Permission @relation(fields: [permissionId], references: [id], onDelete: Cascade)
+
+  @@unique([roleId, permissionId])
+  @@map("role_permissions")
+}
+
+model UserScopeGrant {
+  id                 String   @id @default(uuid())
+  userId             String   @map("user_id")
+  locationId         String   @map("location_id")
+  includeDescendants Boolean  @default(true) @map("include_descendants")
+  createdAt          DateTime @default(now()) @map("created_at")
+
+  user     User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  location Location @relation(fields: [locationId], references: [id], onDelete: Cascade)
+
+  @@unique([userId, locationId])
+  @@map("user_scope_grants")
+}
+
 model UserRole {
-  id        String    @id @default(uuid())
-  userId    String    @map("user_id")
-  roleId    String    @map("role_id")
-  orgUnitId String?   @map("org_unit_id") // Scope root for RLS/RBAC
-  grantedBy String?   @map("granted_by")
-  expiresAt DateTime? @map("expires_at")
-  createdAt DateTime  @default(now()) @map("created_at")
+  id                 String    @id @default(uuid())
+  userId             String    @map("user_id")
+  roleId             String    @map("role_id")
+  orgUnitId          String?   @map("org_unit_id") // Scope root for RLS/RBAC
+  includeDescendants Boolean   @default(true) @map("include_descendants")
+  grantedBy          String?   @map("granted_by")
+  expiresAt          DateTime? @map("expires_at")
+  createdAt          DateTime  @default(now()) @map("created_at")
 
   user    User     @relation(fields: [userId], references: [id], onDelete: Cascade)
   role    Role     @relation(fields: [roleId], references: [id], onDelete: Restrict)
@@ -106,6 +148,7 @@ model Location {
   toEvents     AssetEvent[] @relation("ToLocationEvents")
   stocktakes   StocktakeSession[]
   stocktakeObservations StocktakeObservation[]
+  scopeGrants  UserScopeGrant[]
 
   @@map("locations")
 }
