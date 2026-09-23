@@ -30,6 +30,9 @@ const checkInSchema = z.object({
 export async function transferAsset(req: Request, res: Response, next: NextFunction): Promise<void> {
   try {
     const { assetId } = req.params;
+    if (!assetId) {
+     throw new AppError('Asset ID is required', 400, 'INVALID_ASSET_ID');
+}
     const { targetLocationId, targetCustodianId, reason, approvalNotes } = transferSchema.parse(req.body);
 
     const asset = await prisma.asset.findUnique({
@@ -124,6 +127,9 @@ export async function transferAsset(req: Request, res: Response, next: NextFunct
 export async function checkOutAsset(req: Request, res: Response, next: NextFunction): Promise<void> {
   try {
     const { assetId } = req.params;
+    if (!assetId) {
+     throw new AppError('Asset ID is required', 400, 'INVALID_ASSET_ID');
+}
     const { custodianUserId, purpose, expectedReturnDate } = checkOutSchema.parse(req.body);
 
     const asset = await prisma.asset.findUnique({ where: { id: assetId } });
@@ -172,6 +178,9 @@ export async function checkOutAsset(req: Request, res: Response, next: NextFunct
 export async function checkInAsset(req: Request, res: Response, next: NextFunction): Promise<void> {
   try {
     const { assetId } = req.params;
+    if (!assetId) {
+     throw new AppError('Asset ID is required', 400, 'INVALID_ASSET_ID');
+}
     const { returnLocationId, condition, notes } = checkInSchema.parse(req.body);
 
     const asset = await prisma.asset.findUnique({ where: { id: assetId } });
