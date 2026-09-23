@@ -19,11 +19,11 @@ export async function retireAsset(req: Request, res: Response, next: NextFunctio
   try {
    const { assetId } = req.params;
 
-if (!assetId) {
-  throw new AppError('Asset ID is required', 400, 'INVALID_ASSET_ID');
-}
+   if (!assetId) {
+    throw new AppError('Asset ID is required', 400, 'INVALID_ASSET_ID');
+   }
 
-const data = retireAssetSchema.parse(req.body);
+    const data = retireAssetSchema.parse(req.body);
     const asset = await prisma.asset.findUnique({
       where: { id: assetId },
       include: { currentLocation: true },
