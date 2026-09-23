@@ -17,9 +17,13 @@ const retireAssetSchema = z.object({
  */
 export async function retireAsset(req: Request, res: Response, next: NextFunction): Promise<void> {
   try {
-    const { assetId } = req.params;
-    const data = retireAssetSchema.parse(req.body);
+   const { assetId } = req.params;
 
+if (!assetId) {
+  throw new AppError('Asset ID is required', 400, 'INVALID_ASSET_ID');
+}
+
+const data = retireAssetSchema.parse(req.body);
     const asset = await prisma.asset.findUnique({
       where: { id: assetId },
       include: { currentLocation: true },
