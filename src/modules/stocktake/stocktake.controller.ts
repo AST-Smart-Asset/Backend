@@ -63,7 +63,12 @@ export async function createSession(req: Request, res: Response, next: NextFunct
 export async function recordScan(req: Request, res: Response, next: NextFunction): Promise<void> {
   try {
     const { sessionId } = req.params;
-    const { assetTag, observedLocationId, notes } = scanObservationSchema.parse(req.body);
+
+    if (!sessionId) {
+      throw new AppError('Session ID is required', 400, 'INVALID_SESSION_ID');
+   }
+
+   const { assetTag, observedLocationId, notes } = scanObservationSchema.parse(req.body);
 
     const session = await prisma.stocktakeSession.findUnique({ where: { id: sessionId } });
     if (!session || session.status !== 'active') {
