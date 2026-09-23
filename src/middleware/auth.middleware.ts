@@ -33,9 +33,14 @@ export async function authMiddleware(
     return;
   }
 
-  const token = authHeader.split(' ')[1];
+ const token = authHeader.substring(7).trim();
 
-  try {
+if (!token) {
+  sendError(res, 401, 'UNAUTHORIZED', 'Missing access token', undefined, req.id);
+  return;
+}
+
+try {
     const payload = verifyAccessToken(token);
 
     // Verify user exists and is active in database
